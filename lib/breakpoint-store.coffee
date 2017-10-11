@@ -9,7 +9,7 @@ class BreakpointStore
 
     addDecoration = true
     if breakpointSearched
-      @breakpoints.splice(breakpointSearched, 1)
+      @breakpoints.splice(@breakpoints.indexOf(breakpointSearched), 1)
       addDecoration = false
     else
       @breakpoints.push(breakpoint)
