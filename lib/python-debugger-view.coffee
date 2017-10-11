@@ -72,6 +72,7 @@ class PythonDebuggerView extends View
     @stopApp() if @backendDebugger
     @debuggedFileArgs = @getInputArguments()
     console.log @debuggedFileArgs
+    @debuggedFileName = @getCurrentFilePath()
     if @pathsNotSet()
       @askForPaths()
       return
