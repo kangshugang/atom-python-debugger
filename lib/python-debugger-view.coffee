@@ -32,22 +32,66 @@ class PythonDebuggerView extends View
       @subview "commandEntryView", new TextEditorView
         mini: true,
         placeholderText: "> Enter debugger commands here"
+      @button outlet: "breakpointBtn", click: "toggleBreak", class: "btn", =>
+        @span "break point"
+      @button class: "btn", =>
+        @span "        "
       @button outlet: "runBtn", click: "runApp", class: "btn", =>
         @span "run"
       @button outlet: "stopBtn", click: "stopApp", class: "btn", =>
         @span "stop"
-      @button outlet: "clearBtn", click: "clearOutput", class: "btn", =>
-        @span "clear"
+      @button class: "btn", =>
+        @span "        "
       @button outlet: "stepOverBtn", click: "stepOverBtnPressed", class: "btn", =>
         @span "next"
       @button outlet: "stepInBtn", click: "stepInBtnPressed", class: "btn", =>
         @span "step"
-      @button outlet: "continueBtn", click: "continueBtnPressed", class: "btn", =>
-        @span "continue"
+      @button outlet: "varBtn", click: "varBtnPressed", class: "btn", =>
+        @span "variables"
+      @button class: "btn", =>
+        @span "        "
       @button outlet: "returnBtn", click: "returnBtnPressed", class: "btn", =>
         @span "return"
+      @button outlet: "continueBtn", click: "continueBtnPressed", class: "btn", =>
+        @span "continue"
+      @button class: "btn", =>
+        @span "        "
+      @button outlet: "upBtn", click: "upBtnPressed", class: "btn", =>
+        @span "up"
+      @button outlet: "callstackBtn", click: "callstackBtnPressed", class: "btn", =>
+        @span "callstack"
+      @button outlet: "downBtn", click: "downBtnPressed", class: "btn", =>
+        @span "down"
+      @button class: "btn", =>
+        @span "        "
+      @button outlet: "clearBtn", click: "clearOutput", class: "btn", =>
+        @span "clear"
       @div class: "panel-body", outlet: "outputContainer", =>
         @pre class: "command-output", outlet: "output"
+
+  toggleBreak: ->
+    editor = atom.workspace.getActiveTextEditor()
+    filename = editor.getTitle()
+    lineNumber = editor.getCursorBufferPosition().row + 1
+    breakpoint = new Breakpoint(filename, lineNumber)
+    cmd = @breakpointStore.toggle(breakpoint)
+    if @backendDebugger
+      @backendDebugger.stdin.write(cmd + " " + @getCurrentFilePath() + ":" + lineNumber + "\n")
+    @output.empty()
+    for breakpoint in @breakpointStore.breakpoints
+      @output.append(breakpoint.toCommand() + "\n")
+
+  upBtnPressed: ->
+    @output.empty()
+    @backendDebugger?.stdin.write("up\nbt\n")
+
+  callstackBtnPressed: ->
+    @output.empty()
+    @backendDebugger?.stdin.write("bt\n")
+
+  downBtnPressed: ->
+    @output.empty()
+    @backendDebugger?.stdin.write("down\nbt\n")
 
   stepOverBtnPressed: ->
     @backendDebugger?.stdin.write("n\n")
@@ -78,12 +122,39 @@ class PythonDebuggerView extends View
       return
     @runBackendDebugger()
 
+  varBtnPressed: ->
+    @output.empty()
+
+    @backendDebugger?.stdin.write("for (__k, __v) in [(__k, __v) for __k, __v in globals().items() if not __k.startswith('__')]: print __k, '=', __v\n")
+    @backendDebugger?.stdin.write("print '-------------'\n")
+    @backendDebugger?.stdin.write("for (__k, __v) in [(__k, __v) for __k, __v in locals().items() if __k != 'self' and not __k.startswith('__')]: print __k, '=', __v\n")
+    @backendDebugger?.stdin.write("for (__k, __v) in [(__k, __v) for __k, __v in (self.__dict__ if 'self' in locals().keys() else {}).items()]: print 'self.{0}'.format(__k), '=', __v\n")
+	
+  
+
   # Extract the file name and line number output by the debugger.
   processDebuggerOutput: (data) ->
     data_str = data.toString().trim()
     lineNumber = null
     fileName = null
+    call_stack_str = "Call stack: \n"
 
+    m = /[^-]> (.*[.]py)[(]([0-9]*)[)].*/.exec(data_str)
+    if m
+      [fileName, lineNumber] = [m[1], m[2]]
+      `
+      re = /[\n](>*)[ \t]*(.*[.]py)[(]([0-9]*)[)]([^\n]*)[\n]([^\n]*)/gi;
+      while ((match = re.exec(data_str)))
+      {
+        if (match[1].includes('>')) 
+          call_stack_str += '--> ';
+        else
+          call_stack_str += '    ';
+        call_stack_str += match[5].replace("->", "") + " in " + match[4] + " @ " + match [2] + ": " + match[3] + "\n";
+      }
+      `
+      data_str = call_stack_str
+      
     [data_str, tail] = data_str.split("line:: ")
     if tail
       [lineNumber, tail] = tail.split("\n")
@@ -98,9 +169,16 @@ class PythonDebuggerView extends View
 
     if lineNumber && fileName
       lineNumber = parseInt(lineNumber)
-      options = {initialLine: lineNumber-1, initialColumn:0}
-      atom.workspace.open(fileName, options) if fs.existsSync(fileName)
-      # TODO: add decoration to current line?
+      editor = atom.workspace.getActiveTextEditor()
+      if fileName.toLowerCase() == editor.getPath().toLowerCase()
+        position = Point(lineNumber-1, 0)
+        editor.setCursorBufferPosition(position)
+        editor.unfoldBufferRow(lineNumber)
+        editor.scrollToBufferPosition(position)
+      else
+        options = {initialLine: lineNumber-1, initialColumn:0}
+        atom.workspace.open(fileName, options) if fs.existsSync(fileName)
+        # TODO: add decoration to current line?
 
     @addOutput(data_str.trim())
 
