@@ -13,6 +13,13 @@ class PythonDebuggerView extends View
   debuggedFileArgs: []
   backendDebuggerPath: null
   backendDebuggerName: "atom_pdb.py"
+  flagActionStarted: false
+  flagVarsNeedUpdate: false
+  flagCallstackNeedsUpdate: false
+  # 0 - normal output, 1 - print variables, 2 - print call stack
+  currentState: 0
+  varScrollTop: 0
+  callStackScrollTop: 0
 
   getCurrentFilePath: ->
     editor = atom.workspace.getActivePaneItem()
@@ -32,42 +39,90 @@ class PythonDebuggerView extends View
       @subview "commandEntryView", new TextEditorView
         mini: true,
         placeholderText: "> Enter debugger commands here"
-      @button outlet: "breakpointBtn", click: "toggleBreak", class: "btn", =>
-        @span "break point"
-      @button class: "btn", =>
-        @span "        "
-      @button outlet: "runBtn", click: "runApp", class: "btn", =>
-        @span "run"
-      @button outlet: "stopBtn", click: "stopApp", class: "btn", =>
-        @span "stop"
-      @button class: "btn", =>
-        @span "        "
-      @button outlet: "stepOverBtn", click: "stepOverBtnPressed", class: "btn", =>
-        @span "next"
-      @button outlet: "stepInBtn", click: "stepInBtnPressed", class: "btn", =>
-        @span "step"
-      @button outlet: "varBtn", click: "varBtnPressed", class: "btn", =>
-        @span "variables"
-      @button class: "btn", =>
-        @span "        "
-      @button outlet: "returnBtn", click: "returnBtnPressed", class: "btn", =>
-        @span "return"
-      @button outlet: "continueBtn", click: "continueBtnPressed", class: "btn", =>
-        @span "continue"
-      @button class: "btn", =>
-        @span "        "
-      @button outlet: "upBtn", click: "upBtnPressed", class: "btn", =>
-        @span "up"
-      @button outlet: "callstackBtn", click: "callstackBtnPressed", class: "btn", =>
-        @span "callstack"
-      @button outlet: "downBtn", click: "downBtnPressed", class: "btn", =>
-        @span "down"
-      @button class: "btn", =>
-        @span "        "
-      @button outlet: "clearBtn", click: "clearOutput", class: "btn", =>
-        @span "clear"
-      @div class: "panel-body", outlet: "outputContainer", =>
-        @pre class: "command-output", outlet: "output"
+      @div class: "btn-toolbar", =>
+          @div class: "btn-group", =>
+              @button outlet: "breakpointBtn", click: "toggleBreak", class: "btn", =>
+                @span "break point"
+          @div class: "btn-group", =>
+              @button outlet: "runBtn", click: "runApp", class: "btn", =>
+                @span "run"
+              @button outlet: "stopBtn", click: "stopApp", class: "btn", =>
+                @span "stop"
+          @div class: "btn-group", =>
+              @button outlet: "stepOverBtn", click: "stepOverBtnPressed", class: "btn", =>
+                @span "next"
+              @button outlet: "stepInBtn", click: "stepInBtnPressed", class: "btn", =>
+                @span "step"
+              @button outlet: "returnBtn", click: "returnBtnPressed", class: "btn", =>
+                @span "return"
+              @button outlet: "continueBtn", click: "continueBtnPressed", class: "btn", =>
+                @span "continue"
+          @div class: "btn-group", =>
+              @button outlet: "upBtn", click: "upBtnPressed", class: "btn", =>
+                @span "up"
+              @button outlet: "downBtn", click: "downBtnPressed", class: "btn", =>
+                @span "down"
+          @div class: "btn-group", =>
+              @button outlet: "clearBtn", click: "clearOutput", class: "btn", =>
+                @span "clear"
+          @input class : "input-checkbox", type: "checkbox", id: "ck_input", outlet: "showInput", click: "toggleInput"
+          @label class : "label", for: "ck_input", =>
+            @span "Input"
+          @input class : "input-checkbox", type: "checkbox", id: "ck_vars", outlet: "showVars", click: "toggleVars"
+          @label class : "label", for: "ck_vars", =>
+            @span "Variables"
+          @input class : "input-checkbox", type: "checkbox", id: "ck_callstack", outlet: "showCallstack", click: "toggleCallstack"
+          @label class : "label", for: "ck_callstack", =>
+            @span "Call stack"
+      @div class: "block", outlet: "bottomPane", =>
+        @div class: "inline-block panel", id: "outputPane", outlet: "outputPane", =>
+          @pre class: "command-output", outlet: "output"
+        @div class: "inline-block panel", id: "variablesPane", outlet: "variablesPane", =>
+          @pre class: "command-output", outlet: "variables"
+        @div class: "inline-block panel", id: "callstackPane", outlet: "callstackPane", =>
+          @pre class: "command-output", outlet: "callstack"
+
+  toggleInput: ->
+    if @backendDebugger
+      @argsEntryView.hide()
+      if @showInput.prop('checked')
+        @commandEntryView.show()
+      else
+        @commandEntryView.hide()
+    else
+      if @showInput.prop('checked')
+        @argsEntryView.show()
+      else
+        @argsEntryView.hide()
+      @commandEntryView.hide()
+
+  toggleVars: ->
+    @togglePanes()
+
+  toggleCallstack: ->
+    @togglePanes()
+
+  togglePanes: ->
+    n = 1
+    if @showVars.prop('checked')
+      @variablesPane.show()
+      n = n+1
+    else
+      @variablesPane.hide()
+    if @showCallstack.prop('checked')
+      @callstackPane.show()
+      n = n+1
+    else
+      @callstackPane.hide()
+    width = ''+(100/n)+'%'
+    @outputPane.css('width', width)
+    if @showVars.prop('checked')
+      @variablesPane.css('width', width)
+    if @showCallstack.prop('checked')
+      @callstackPane.css('width', width)
+    # the following statements are used to update the information in the variables/callstack
+    @setFlags()
+    @backendDebugger?.stdin.write("print 'display option changed.'\n")
 
   toggleBreak: ->
     editor = atom.workspace.getActiveTextEditor()
@@ -81,29 +136,53 @@ class PythonDebuggerView extends View
     for breakpoint in @breakpointStore.breakpoints
       @output.append(breakpoint.toCommand() + "\n")
 
-  upBtnPressed: ->
-    @output.empty()
-    @backendDebugger?.stdin.write("up\nbt\n")
-
-  callstackBtnPressed: ->
-    @output.empty()
-    @backendDebugger?.stdin.write("bt\n")
-
-  downBtnPressed: ->
-    @output.empty()
-    @backendDebugger?.stdin.write("down\nbt\n")
-
   stepOverBtnPressed: ->
+    @setFlags()
     @backendDebugger?.stdin.write("n\n")
 
   stepInBtnPressed: ->
+    @setFlags()
     @backendDebugger?.stdin.write("s\n")
 
   continueBtnPressed: ->
+    @setFlags()
     @backendDebugger?.stdin.write("c\n")
 
   returnBtnPressed: ->
+    @setFlags()
     @backendDebugger?.stdin.write("r\n")
+
+  upBtnPressed: ->
+    @setFlags()
+    @backendDebugger?.stdin.write("up\n")
+
+  downBtnPressed: ->
+    @setFlags()
+    @backendDebugger?.stdin.write("down\n")
+
+  printVars: ->
+    @variables.empty()
+    @backendDebugger?.stdin.write("print ('@{variables_start}')\n")
+    @backendDebugger?.stdin.write("for (__k, __v) in [(__k, __v) for __k, __v in globals().items() if not __k.startswith('__')]: print __k, '=', __v\n")
+    @backendDebugger?.stdin.write("print '-------------'\n")
+    @backendDebugger?.stdin.write("for (__k, __v) in [(__k, __v) for __k, __v in locals().items() if __k != 'self' and not __k.startswith('__')]: print __k, '=', __v\n")
+    @backendDebugger?.stdin.write("for (__k, __v) in [(__k, __v) for __k, __v in (self.__dict__ if 'self' in locals().keys() else {}).items()]: print 'self.{0}'.format(__k), '=', __v\n")
+    @backendDebugger?.stdin.write("print ('@{variables_end}')\n")
+
+  printCallstack: ->
+    @callstack.empty()
+    @backendDebugger?.stdin.write("print ('@{callstack_start}')\n")
+    @backendDebugger?.stdin.write("bt\n")
+    @backendDebugger?.stdin.write("print ('@{callstack_end}')\n")
+
+  setFlags: ->
+    @flagActionStarted = true
+    if @showVars.prop('checked')
+     @varScrollTop = @variables.prop('scrollTop')
+     @flagVarsNeedUpdate = true
+    if @showCallstack.prop('checked')
+      @callStackScrollTop = @callstack.prop('scrollTop')
+      @flagCallstackNeedsUpdate = true
 
   workspacePath: ->
     editor = atom.workspace.getActiveTextEditor()
@@ -120,53 +199,11 @@ class PythonDebuggerView extends View
     if @pathsNotSet()
       @askForPaths()
       return
+    @setFlags()
     @runBackendDebugger()
+    @toggleInput()
 
-  varBtnPressed: ->
-    @output.empty()
-
-    @backendDebugger?.stdin.write("for (__k, __v) in [(__k, __v) for __k, __v in globals().items() if not __k.startswith('__')]: print __k, '=', __v\n")
-    @backendDebugger?.stdin.write("print '-------------'\n")
-    @backendDebugger?.stdin.write("for (__k, __v) in [(__k, __v) for __k, __v in locals().items() if __k != 'self' and not __k.startswith('__')]: print __k, '=', __v\n")
-    @backendDebugger?.stdin.write("for (__k, __v) in [(__k, __v) for __k, __v in (self.__dict__ if 'self' in locals().keys() else {}).items()]: print 'self.{0}'.format(__k), '=', __v\n")
-	
-  
-
-  # Extract the file name and line number output by the debugger.
-  processDebuggerOutput: (data) ->
-    data_str = data.toString().trim()
-    lineNumber = null
-    fileName = null
-    call_stack_str = "Call stack: \n"
-
-    m = /[^-]> (.*[.]py)[(]([0-9]*)[)].*/.exec(data_str)
-    if m
-      [fileName, lineNumber] = [m[1], m[2]]
-      `
-      re = /[\n](>*)[ \t]*(.*[.]py)[(]([0-9]*)[)]([^\n]*)[\n]([^\n]*)/gi;
-      while ((match = re.exec(data_str)))
-      {
-        if (match[1].includes('>')) 
-          call_stack_str += '--> ';
-        else
-          call_stack_str += '    ';
-        call_stack_str += match[5].replace("->", "") + " in " + match[4] + " @ " + match [2] + ": " + match[3] + "\n";
-      }
-      `
-      data_str = call_stack_str
-      
-    [data_str, tail] = data_str.split("line:: ")
-    if tail
-      [lineNumber, tail] = tail.split("\n")
-      data_str = data_str + tail if tail
-
-    [data_str, tail] = data_str.split("file:: ")
-    if tail
-      [fileName, tail] = tail.split("\n")
-      data_str = data_str + tail if tail
-      fileName = fileName.trim() if fileName
-      fileName = null if fileName == "<string>"
-
+  highlightLineInEditor: (fileName, lineNumber) ->
     if lineNumber && fileName
       lineNumber = parseInt(lineNumber)
       editor = atom.workspace.getActiveTextEditor()
@@ -180,7 +217,112 @@ class PythonDebuggerView extends View
         atom.workspace.open(fileName, options) if fs.existsSync(fileName)
         # TODO: add decoration to current line?
 
-    @addOutput(data_str.trim())
+  processNormalOutput: (data_str) ->
+
+    lineNumber = null
+    fileName = null
+
+    # print the action_end string
+    if @flagActionStarted
+        @backendDebugger?.stdin.write("print ('@{action_end}')\n")
+        @flagActionStarted = false
+
+    # detect predefined flag strings
+    isActionEnd = data_str.includes('@{action_end}')
+    isVarsStart = data_str.includes('@{variables_start}')
+    isCallstackStart = data_str.includes('@{callstack_start}')
+
+    # variables print started
+    if isVarsStart
+        @currentState = 1
+        @processVariables(data_str)
+        return
+
+    # call stack print started
+    if isCallstackStart
+        @currentState = 2
+        @processCallstack(data_str)
+        return
+
+    # handle normal output
+    [data_str, tail] = data_str.split("line:: ")
+    if tail
+      [lineNumber, tail] = tail.split("\n")
+      data_str = data_str + tail if tail
+
+    [data_str, tail] = data_str.split("file:: ")
+    if tail
+      [fileName, tail] = tail.split("\n")
+      data_str = data_str + tail if tail
+      fileName = fileName.trim() if fileName
+      fileName = null if fileName == "<string>"
+
+    # highlight the current line
+    if lineNumber && fileName
+      @highlightLineInEditor(fileName, lineNumber)
+
+    # print the output
+    @addOutput(data_str.trim().replace('@{action_end}', ''))
+
+    # if action end, trigger the follow up actions
+    if isActionEnd
+      if @flagVarsNeedUpdate
+        @printVars()
+        @flagVarsNeedUpdate = false
+      else
+        if @flagCallstackNeedsUpdate
+          @printCallstack()
+          @flagCallstackNeedsUpdate = false
+
+  processVariables: (data_str) ->
+    isVarsEnd = data_str.includes('@{variables_end}')
+    for line in data_str.split '\n'
+      if ! line.includes("@{variable")
+        @variables.append(@createOutputNode(line))
+        @variables.append('\n')
+    if isVarsEnd
+      @variables.prop('scrollTop', @varScrollTop)
+      @currentState = 0
+      if @flagCallstackNeedsUpdate
+        @printCallstack()
+        @flagCallstackNeedsUpdate = false
+
+  processCallstack: (data_str) ->
+    lineNumber = null
+    fileName = null
+    isCallstackEnd = data_str.includes('@{callstack_end}')
+    m = /[^-]> (.*[.]py)[(]([0-9]*)[)].*/.exec(data_str)
+    if m
+      [fileName, lineNumber] = [m[1], m[2]]
+      callstack_pre = @callstack
+      `
+      re = /[\n](>*)[ \t]*(.*[.]py)[(]([0-9]*)[)]([^\n]*)[\n]([^\n]*)/gi;
+      while ((match = re.exec(data_str)))
+      {
+        if (match[5].includes('exec cmd in globals, locals')) continue;
+        if (match[1].includes('>'))
+          item = "<b><u>"+match[5].replace("->", "")+"</u></b>";
+        else
+          item = match[5].replace("->", "");
+        callstack_pre.append(item);
+        callstack_pre.append('\n');
+      }
+      `
+    if lineNumber && fileName
+      @highlightLineInEditor(fileName, lineNumber)
+    if isCallstackEnd
+      @currentState = 0
+      @callstack.prop('scrollTop', @callStackScrollTop)
+
+  # Extract the file name and line number output by the debugger.
+  processDebuggerOutput: (data) ->
+    data_str = data.toString().trim()
+    if @currentState == 1
+      @processVariables(data_str)
+    else if @currentState == 2
+      @processCallstack(data_str)
+    else
+      @processNormalOutput(data_str)
 
   runBackendDebugger: ->
     args = [path.join(@backendDebuggerPath, @backendDebuggerName)]
@@ -208,6 +350,7 @@ class PythonDebuggerView extends View
     @backendDebugger?.stdin.write("\nexit()\n")
     @backendDebugger = null
     console.log "debugger stopped"
+    @toggleInput()
 
   clearOutput: ->
     @output.empty()
@@ -234,6 +377,8 @@ class PythonDebuggerView extends View
     @breakpointStore = breakpointStore
     @debuggedFileName = @getCurrentFilePath()
     @backendDebuggerPath = @getDebuggerPath()
+    @toggleInput()
+    @togglePanes()
     @addOutput("Welcome to Python Debugger for Atom!")
     @addOutput("The file being debugged is: " + @debuggedFileName)
     @askForPaths()

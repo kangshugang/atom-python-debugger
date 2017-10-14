@@ -2,8 +2,20 @@
 @import "octicon-mixins";
 
 .command-output {
-  background-color: transparent;
-  height: 100px;
-  max-height: 100px;
+  height: 100%;
   overflow-y: scroll;
+  padding: 5px;
+  margin: 0px;
+}
+
+#outputPane, #variablesPane, #callstackPane {
+  width: 33%;
+  height: 200px;
+  max-height: 200px;
+  margin: 0px;
+}
+
+#ck_input, #ck_vars, #ck_callstack {
+  margin-left: 10px;
+  margin-right: 5px;
 }
